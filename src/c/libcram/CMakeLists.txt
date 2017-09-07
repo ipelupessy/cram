@@ -17,7 +17,7 @@ set(CRAM_FORTRAN_SOURCES
   cram_fortran.c
   cram_fargs.c
   cram_file.c)
-add_library(fcram STATIC ${CRAM_FORTRAN_SOURCES})
+add_static_and_shared_library(fcram ${CRAM_FORTRAN_SOURCES})
 
 #
 # This command post-processes the fortran library so that the various

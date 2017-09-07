@@ -479,12 +479,12 @@ void cram_job_setup(const cram_job_t *job, int *argc, const char ***argv) {
 
   // save argv[0] so that we can use it for the first arg.
   const char *exe_name = NULL;
-  if (*argc > 0 && *argv) {
+  if (argc && *argc > 0 && *argv) {
     exe_name = (*argv)[0];
   }
 
   // Replace command line arguments with those of the job.
-  arg_copy(job, argc, argv);
+  if(argc) arg_copy(job, argc, argv);
 
   // set argv[0] to the actual exe name
   if (strcmp(job->args[0], CRAM_DEFAULT_EXE) == 0) {

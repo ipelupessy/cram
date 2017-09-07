@@ -1,6 +1,8 @@
 project(Cram C Fortran)
 cmake_minimum_required(VERSION 2.8)
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+
 # Use C99
 if (CMAKE_C_COMPILER_ID STREQUAL "XL")
   # XL compilers are different

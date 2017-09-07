@@ -2,6 +2,8 @@
 //
 // This file defines MPI wrappers for cram.
 //
+#define _GNU_SOURCE 
+#include <limits.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
@@ -16,6 +18,13 @@
 
 // Local world communicator for each job run concurrently.
 static MPI_Comm local_world;
+// local parent communicator
+static MPI_Comm local_parent;
+// local available spawn comms
+static int number_of_spawns;
+static MPI_Comm *spawn_comms;
+static char ** spawn_exe_names;
+static int *spawn_nprocs;
 
 // This function modifies its parameter by swapping it with local world.
 // if it is MPI_COMM_WORLD.
@@ -170,13 +179,14 @@ static void setup_crash_handlers() {
     on_exit(on_exit_handler, NULL);
 }
 
-
-//
-// MPI_Init does all the communicator setup
-//
-{{fn func MPI_Init}}{
-  // First call PMPI_Init()
-  {{callfn}}
+int init_cram(int *argc, char ***argv){
+  static int largc;
+  static char **largv;
+  if(!argc) {
+    largc=0;
+    argc=&largc;
+    argv=&largv; 
+  }
 
   // Get this process's rank.
   int rank;
@@ -234,10 +244,66 @@ static void setup_crash_handlers() {
   }
 
   // set up this job's environment based on the job descriptor.
-  cram_job_setup(&cram_job, {{0}}, (const char***){{1}});
+  cram_job_setup(&cram_job, argc, (const char ***)argv);
   PMPI_Comm_rank(local_world, &local_rank);
   double setup_time = PMPI_Wtime();
 
+  // setup intercommunicator(s)
+  if(job_id==0) {
+    int remote_leader,size;
+    MPI_Comm_size( local_world, &size);
+    number_of_spawns=cram_file.num_jobs;
+    printf("number of jobs: %d\n", cram_file.num_jobs); 
+    spawn_comms = (MPI_Comm*) malloc(cram_file.num_jobs*sizeof(MPI_Comm));
+    spawn_exe_names = (char**) malloc(cram_file.num_jobs*sizeof(char*));
+    spawn_nprocs = (int*) malloc(cram_file.num_jobs*sizeof(int));
+    spawn_nprocs[0]=size;
+    remote_leader=0;
+    for(int i=1;i<cram_file.num_jobs;i++) {
+      MPI_Comm new_intercomm;
+      remote_leader+=size;
+      PMPI_Intercomm_create(local_world, 0, MPI_COMM_WORLD, remote_leader , i, &new_intercomm);
+      spawn_comms[i]=new_intercomm;
+      // receive new size
+      PMPI_Recv(&size, 1, MPI_INT, 0, 0, new_intercomm, MPI_STATUS_IGNORE);
+      spawn_nprocs[i]=size;
+      // retrieve exename
+      MPI_Status status;
+      int count;
+      PMPI_Probe(0,11, new_intercomm, &status);
+      PMPI_Get_count(&status, MPI_CHAR, &count);
+      char path[PATH_MAX];
+      PMPI_Recv(&path, count, MPI_CHAR, 0, 11, new_intercomm, MPI_STATUS_IGNORE);
+      spawn_exe_names[i]=(char *) malloc((count)*sizeof(char));
+      strcpy(spawn_exe_names[i],path);
+    }
+    local_parent=MPI_COMM_NULL;
+    spawn_comms[0]=MPI_COMM_NULL;
+
+    spawn_exe_names[0]=(char *) malloc(strlen(*argv[0])*sizeof(char));
+    strcpy(spawn_exe_names[0],*argv[0]);
+
+    if(remote_leader+size != cram_file.total_procs) {
+      fprintf(stderr, "processor count error\n");
+      PMPI_Abort(MPI_COMM_WORLD, 1);
+    } 
+    printf("available workers:\n");
+    for(int i=0;i<cram_file.num_jobs;i++) printf(">> %s\n", spawn_exe_names[i]);
+  } else {
+    int size;
+    MPI_Comm new_intercomm;
+    PMPI_Intercomm_create(local_world, 0, MPI_COMM_WORLD, 0 , job_id, &new_intercomm);
+    local_parent=new_intercomm;
+    // send local size
+    PMPI_Comm_size(local_world, &size);
+    if(local_rank==0) {
+      PMPI_Send(&size, 1, MPI_INT, 0, 0, new_intercomm);
+      char *path;
+      PMPI_Send(*argv[0], strlen(*argv[0])+1, MPI_CHAR, 0, 11, new_intercomm);
+      }
+  }
+
+  // continue with setting output 
   cram_output_mode = get_output_mode();
   char out_file_name[1024];
   char err_file_name[1024];
@@ -293,13 +359,61 @@ static void setup_crash_handlers() {
   setup_crash_handlers();
 
   cram_job_free(&cram_job);
+  return MPI_SUCCESS;
+}
+//
+// MPI_Init does all the communicator setup
+//
+{{fn func MPI_Init}}{
+  // First call PMPI_Init()
+  {{callfn}}
+  int result;
+  result=init_cram({{0}},{{1}});
+  if(result != MPI_SUCCESS) return result;
+}{{endfn}}
+
+{{fn func MPI_Init_thread}}{
+  // First call PMPI_Init_thread()
+  {{callfn}}
+  int result;
+  result=init_cram({{0}},{{1}});
+  if(result != MPI_SUCCESS) return result;
+}{{endfn}}
+
+{{fn func MPI_Comm_get_parent}}{
+  printf("wrapping MPI_comm_get_parent...\n");
+  // First call PMPI_Comm_get_parent()
+  if(local_world==MPI_COMM_WORLD){
+  {{callfn}}
+  } else {
+  *{{0}}=local_parent;
+  }
+  printf("..done\n");
+}{{endfn}}
+
+{{fn func MPI_Comm_spawn}}{
+  printf("wrapping MPI_comm_spawn...\n");
+ printf("argv[0]: %s\n", {{0}});
+ for(int i=1;i<number_of_spawns;i++)
+ {
+   if(spawn_comms[i]!=MPI_COMM_NULL && !strcmp({{0}}, spawn_exe_names[i])) {
+     printf("found %s %s\n",{{0}}, spawn_exe_names[i]);     
+//     PMPI_Barrier(spawn_comms[i]);
+     *{{6}}=spawn_comms[i];
+     spawn_comms[i]=MPI_COMM_NULL;
+     return MPI_SUCCESS;
+     }
+ }
+// for now hard fail if not possible from predef. intercomms
+ return MPI_ERR_ARG;
+//  {{callfn}}
 }{{endfn}}
 
 // This generates interceptors that will catch every MPI routine
 // *except* MPI_Init.  The interceptors just make sure that if
 // they are called with an argument of type MPI_Comm that has a
 // value of MPI_COMM_WORLD, they switch it to local_world.
-{{fnall func MPI_Init}}{
+{{fnall func MPI_Init MPI_Init_thread MPI_Comm_get_errhandler MPI_Comm_set_errhandler MPI_Comm_get_parent MPI_Comm_spawn}}{
   {{apply_to_type MPI_Comm swap_world}}
   {{callfn}}
 }{{endfnall}}
