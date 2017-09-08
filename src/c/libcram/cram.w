@@ -2,7 +2,6 @@
 //
 // This file defines MPI wrappers for cram.
 //
-#define _GNU_SOURCE 
 #include <limits.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -253,7 +252,6 @@ int init_cram(int *argc, char ***argv){
     int remote_leader,size;
     MPI_Comm_size( local_world, &size);
     number_of_spawns=cram_file.num_jobs;
-    printf("number of jobs: %d\n", cram_file.num_jobs); 
     spawn_comms = (MPI_Comm*) malloc(cram_file.num_jobs*sizeof(MPI_Comm));
     spawn_exe_names = (char**) malloc(cram_file.num_jobs*sizeof(char*));
     spawn_nprocs = (int*) malloc(cram_file.num_jobs*sizeof(int));
