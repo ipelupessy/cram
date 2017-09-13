@@ -285,8 +285,8 @@ int init_cram(int *argc, char ***argv){
       fprintf(stderr, "processor count error\n");
       PMPI_Abort(MPI_COMM_WORLD, 1);
     } 
-    printf("available workers:\n");
-    for(int i=0;i<cram_file.num_jobs;i++) printf(">> %s\n", spawn_exe_names[i]);
+    printf("\n list of job executables (nprocs):\n");
+    for(int i=0;i<cram_file.num_jobs;i++) printf(" >> %s (%d)\n", spawn_exe_names[i], spawn_nprocs[i]);
   } else {
     int size;
     MPI_Comm new_intercomm;
@@ -379,23 +379,23 @@ int init_cram(int *argc, char ***argv){
 }{{endfn}}
 
 {{fn func MPI_Comm_get_parent}}{
-  printf("wrapping MPI_comm_get_parent...\n");
+  //printf("wrapping MPI_comm_get_parent...\n");
   // First call PMPI_Comm_get_parent()
   if(local_world==MPI_COMM_WORLD){
   {{callfn}}
   } else {
   *{{0}}=local_parent;
   }
-  printf("..done\n");
+  //printf("..done\n");
 }{{endfn}}
 
 {{fn func MPI_Comm_spawn}}{
-  printf("wrapping MPI_comm_spawn...\n");
- printf("argv[0]: %s\n", {{0}});
+  //printf("wrapping MPI_comm_spawn...\n");
+  //printf("argv[0]: %s\n", {{0}});
  for(int i=1;i<number_of_spawns;i++)
  {
    if(spawn_comms[i]!=MPI_COMM_NULL && !strcmp({{0}}, spawn_exe_names[i])) {
-     printf("found %s %s\n",{{0}}, spawn_exe_names[i]);     
+//     printf("found %s %s\n",{{0}}, spawn_exe_names[i]);     
 //     PMPI_Barrier(spawn_comms[i]);
      *{{6}}=spawn_comms[i];
      spawn_comms[i]=MPI_COMM_NULL;
